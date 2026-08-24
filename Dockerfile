@@ -3,8 +3,10 @@
 # ========================================================
 FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend
 WORKDIR /src/frontend
-COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+# Используем *, чтобы не упасть, если package-lock.json вообще отсутствует в релизе
+COPY frontend/package*.json ./
+# Заменяем строгий 'npm ci' на отказоустойчивый 'npm install'
+RUN npm install
 COPY frontend/ ./
 COPY internal/web/translation /src/internal/web/translation
 RUN npm run build
