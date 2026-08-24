@@ -1,0 +1,75 @@
+name: Build and Publish LucX-UI
+
+on:
+  workflow_dispatch: # Запуск по кнопке
+  schedule:
+    - cron: '0 21 */2 * *' # Автосборка по нечётным дням
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write 
+
+    steps:
+      # 1. Получаем номер последнего релиза из оригинального репозитория
+      - name: Get latest upstream release tag
+        id: get_version
+        run: |
+          LATEST_TAG=$(curl -sL https://api.github.com/repos/AlexeyLCP/lucx-ui/releases/latest | jq -r .tag_name)
+          echo "Latest upstream release is: $LATEST_TAG"
+          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+
+      # 2. Скачиваем НАШ репозиторий (чтобы взять наш Dockerfile)
+      - name: Checkout custom repository
+        uses: actions/checkout@v4
+        with:
+          path: 'custom'
+
+      # 3. Скачиваем ОРИГИНАЛЬНЫЙ репозиторий ИМЕННО ЭТОЙ ВЕРСИИ
+      - name: Checkout upstream repository
+        uses: actions/checkout@v4
+        with:
+          repository: 'AlexeyLCP/lucx-ui'
+          path: 'upstream'
+          ref: ${{ steps.get_version.outputs.tag }} # Ветка/тег совпадает с релизом
+
+      # 4. Подменяем оригинальный Dockerfile на наш
+      - name: Replace Dockerfile
+        run: cp custom/Dockerfile upstream/Dockerfile
+
+      # 5. Генерируем правильные теги для образа (latest + номер релиза)
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=${{ steps.get_version.outputs.tag }}
+
+      # 6. Авторизуемся в реестре GitHub
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 7. Настраиваем современный сборщик (помогает с кешем и многостадийностью)
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 8. Собираем и Пушим!
+      - name: Build and Push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./upstream
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
