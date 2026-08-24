@@ -3,8 +3,10 @@
 # ========================================================
 FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend
 WORKDIR /src/frontend
-COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+# Используем *, чтобы не упасть, если package-lock.json вообще отсутствует в релизе
+COPY frontend/package*.json ./
+# Заменяем строгий 'npm ci' на отказоустойчивый 'npm install'
+RUN npm install
 COPY frontend/ ./
 COPY internal/web/translation /src/internal/web/translation
 RUN npm run build
@@ -12,7 +14,7 @@ RUN npm run build
 # ========================================================
 # Stage 2: Builder (Панель + Утилиты AWG)
 # ========================================================
-FROM golang:1.26-alpine AS builder
+FROM golang:1.27-alpine AS builder
 WORKDIR /app
 ARG TARGETARCH
 
