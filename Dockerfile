@@ -52,7 +52,7 @@ RUN git clone https://github.com/amnezia-vpn/amneziawg-go.git /tmp/awg-go && \
 # Stage 3: Final Image of 3x-ui / Lucx-UI
 # ========================================================
 FROM alpine
-ENV TZ=Asia/Tehran
+ENV TZ=Europe/Moscow
 WORKDIR /app
 
 # Добавили сетевые пакеты для WG и AWG
