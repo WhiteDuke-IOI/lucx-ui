@@ -20,10 +20,30 @@ jobs:
       # 1. Получаем номер последнего релиза из оригинального репозитория
       - name: Get latest upstream release tag
         id: get_version
+        shell: bash
         run: |
-          LATEST_TAG=$(curl -sL https://api.github.com/repos/AlexeyLCP/lucx-ui/releases/latest | jq -r .tag_name)
-          echo "Latest upstream release is: $LATEST_TAG"
-          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          set -euo pipefail
+
+          # --fail:  exit code != 0 на HTTP-ошибки
+          # --retry: повтор при сетевых сбоях и 429/5xx
+          # Authorization: лимит 5000 req/h вместо 60
+          response="$(curl --fail --show-error --location \
+            --retry 3 --retry-delay 5 \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/AlexeyLCP/lucx-ui/releases/latest)" || {
+              echo "::error::GitHub API request failed (rate limit? network error?)"
+              exit 1
+            }
+
+          latest_tag="$(jq -er '.tag_name // empty' <<< "$response")" || {
+            echo "::error::Could not extract tag_name from API response:"
+            echo "$response" | head -20
+            exit 1
+          }
+
+          echo "Latest upstream release is: $latest_tag"
+          echo "tag=$latest_tag" >> "$GITHUB_OUTPUT"
 
       # 2. Скачиваем НАШ репозиторий (чтобы взять наш Dockerfile)
       - name: Checkout custom repository
@@ -73,3 +93,5 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          secrets: |
+            github_token=${{ secrets.GITHUB_TOKEN }}

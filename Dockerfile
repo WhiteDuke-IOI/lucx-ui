@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+
 # ========================================================
 # Stage 1: Frontend (Vite)
 # ========================================================
@@ -10,6 +12,7 @@ RUN npm install
 COPY frontend/ ./
 COPY internal/web/translation /src/internal/web/translation
 RUN npm run build
+
 
 # ========================================================
 # Stage 2: Builder (Панель + Утилиты AWG)
@@ -36,17 +39,35 @@ COPY --from=frontend /src/internal/web/dist ./internal/web/dist
 ENV CGO_ENABLED=1
 ENV CGO_CFLAGS="-D_LARGEFILE64_SOURCE"
 RUN go build -ldflags "-w -s" -o build/x-ui main.go
-RUN ./DockerInit.sh "$TARGETARCH"
 
-# Собираем утилиты AWG
-RUN git clone https://github.com/amnezia-vpn/amneziawg-tools.git /tmp/awg-tools && \
+# ─── DockerInit + git clone — one secret-mount ───
+RUN --mount=type=secret,id=github_token \
+    # Настраиваем .netrc — curl и git подхватят токен автоматически
+    TOKEN=$(cat /run/secrets/github_token 2>/dev/null) && \
+    if [ -n "$TOKEN" ]; then \
+      printf 'machine api.github.com\nlogin x-access-token\npassword %s\n' "$TOKEN" > ~/.netrc && \
+      printf 'machine github.com\nlogin x-access-token\npassword %s\n' "$TOKEN" >> ~/.netrc && \
+      chmod 600 ~/.netrc; \
+    fi && \
+    \
+    # DockerInit.sh — его curl теперь авторизован (5000 req/h)
+    ./DockerInit.sh "$TARGETARCH" && \
+    \
+    # AWG tools
+    git clone https://github.com/amnezia-vpn/amneziawg-tools.git /tmp/awg-tools && \
     cd /tmp/awg-tools/src && \
     make && \
-    make install WITH_WGQUICK=yes PREFIX=/usr DESTDIR=/app/build-awg
-
-RUN git clone https://github.com/amnezia-vpn/amneziawg-go.git /tmp/awg-go && \
+    make install WITH_WGQUICK=yes PREFIX=/usr DESTDIR=/app/build-awg && \
+    \
+    # AWG Go
+    cd /app && \
+    git clone https://github.com/amnezia-vpn/amneziawg-go.git /tmp/awg-go && \
     cd /tmp/awg-go && \
-    go build -v -o /app/build-awg/usr/bin/amneziawg-go
+    go build -v -o /app/build-awg/usr/bin/amneziawg-go && \
+    \
+    # Убираем .netrc (перестраховка)
+    rm -f ~/.netrc
+
 
 # ========================================================
 # Stage 3: Final Image of 3x-ui / Lucx-UI
